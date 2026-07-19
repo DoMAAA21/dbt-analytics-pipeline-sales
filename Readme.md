@@ -15,13 +15,24 @@ A showcase project for an end-to-end **dbt analytics pipeline**, split across th
 ```
 ┌──────────┐      ┌──────────┐      ┌────────────────┐
 │  client  │ ───► │  server  │ ───► │ dbt-analytics  │
-│ (UI)     │      │ (API)    │      │ (transforms)   │
-└──────────┘      └──────────┘      └────────────────┘
+│ (charts) │      │ (API)    │      │ bronze→silver  │
+└──────────┘      └──────────┘      │ →gold marts    │
+                                    └────────┬───────┘
+                                             │
+                                    Postgres OLTP (ecommerce)
 ```
 
-1. **dbt-analytics** transforms raw data into clean, tested analytical models.
-2. **server** exposes those models through APIs for consumption.
-3. **client** presents insights with dashboards and interactive views.
+1. **Postgres OLTP** holds normalized ecommerce data ([`SCHEMA.md`](./SCHEMA.md)).
+2. **dbt** builds Bronze → Silver → Gold models ([`ANALYTICS.md`](./ANALYTICS.md)).
+3. **server** exposes gold marts through APIs.
+4. **client** renders dashboards (revenue, products, cohorts, ops).
+
+## Docs
+
+| Doc | Contents |
+|---|---|
+| [`SCHEMA.md`](./SCHEMA.md) | Ecommerce ERD / OLTP tables |
+| [`ANALYTICS.md`](./ANALYTICS.md) | Medallion layers + chart plan |
 
 ## Getting Started
 
