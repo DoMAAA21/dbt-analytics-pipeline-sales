@@ -8,5 +8,5 @@ export default new DataSource({
   entities: [User],
   migrations: [__dirname + '/migrations/*{.ts,.js}'],
   synchronize: false,
-  logging: true,
+  logging: process.env.TYPEORM_LOGGING === 'true',
 });
