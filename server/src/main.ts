@@ -7,8 +7,9 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
-
-  app.setGlobalPrefix('api');
+  const apiVersion = configService.get<string>('API_VERSION') ?? 'v1';
+  
+  app.setGlobalPrefix('api/' + apiVersion);
   app.use(cookieParser());
   app.enableCors({
     origin: configService.get<string>('CLIENT_URL') ?? 'http://localhost:5001',

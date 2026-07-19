@@ -25,7 +25,7 @@ export default function DashboardPage() {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      const { data } = await http.post("/api/auth/logout");
+      const { data } = await http.post("/auth/logout");
       return data;
     },
     onSuccess: async () => {

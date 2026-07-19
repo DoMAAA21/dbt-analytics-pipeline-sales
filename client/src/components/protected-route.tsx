@@ -7,7 +7,7 @@ export function ProtectedRoute() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["auth", "me"],
     queryFn: async () => {
-      const { data } = await http.get("/api/auth/me");
+      const { data } = await http.get("/auth/me");
       return data;
     },
     retry: false,
