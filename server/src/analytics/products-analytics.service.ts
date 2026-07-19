@@ -18,59 +18,57 @@ import type {
 } from './analytics.types';
 
 const DEFAULT_RANGE_DAYS = 60;
-const REVENUE_ORDER_STATUSES = `('paid', 'fulfilled', 'refunded')`;
 
-/** Shared CTE: date-filtered paid commerce lines with refunds allocated by line share. */
+/**
+ * Shared CTE over silver facts/dims.
+ * Refunds allocated to products by line revenue share of the order.
+ */
 const LINES_CTE = `
 WITH params AS (
   SELECT ?::DATE AS start_date, ?::DATE AS end_date
 ),
-eligible_orders AS (
-  SELECT o.id, o.placed_at, o.total_cents
-  FROM bronze.bronze_oltp__orders o
-  CROSS JOIN params p
-  WHERE o.placed_at >= p.start_date
-    AND o.placed_at < p.end_date + INTERVAL '1 day'
-    AND o.status IN ${REVENUE_ORDER_STATUSES}
-),
-order_refunds AS (
+eligible_lines AS (
   SELECT
-    eo.id AS order_id,
-    COALESCE(SUM(r.amount_cents), 0)::BIGINT AS refund_cents
-  FROM eligible_orders eo
-  LEFT JOIN bronze.bronze_oltp__payments pay
-    ON pay.order_id = eo.id
-   AND pay.status IN ('succeeded', 'refunded')
-  LEFT JOIN bronze.bronze_oltp__refunds r
-    ON r.payment_id = pay.id
-   AND r.status = 'completed'
-  GROUP BY eo.id
-),
-raw_lines AS (
-  SELECT
-    oi.id AS line_id,
+    oi.order_item_id AS line_id,
     oi.order_id,
-    eo.placed_at,
-    pv.product_id,
-    pv.id AS variant_id,
-    pr.name AS product_name,
+    oi.placed_at,
+    oi.order_date,
+    oi.product_id,
+    oi.variant_id,
+    oi.product_name,
     oi.quantity::BIGINT AS quantity,
     oi.line_total_cents::BIGINT AS line_total_cents,
     oi.discount_cents::BIGINT AS discount_cents,
-    (oi.quantity * COALESCE(pv.cost_cents, 0))::BIGINT AS cogs_cents,
-    SUM(oi.line_total_cents) OVER (PARTITION BY oi.order_id)::BIGINT AS order_lines_total,
+    oi.cogs_cents::BIGINT AS cogs_cents
+  FROM silver.silver_fct_order_items oi
+  CROSS JOIN params p
+  WHERE oi.order_date >= p.start_date
+    AND oi.order_date <= p.end_date
+    AND oi.is_revenue_order = true
+),
+order_refunds AS (
+  SELECT
+    r.order_id,
+    COALESCE(SUM(r.refund_cents), 0)::BIGINT AS refund_cents
+  FROM silver.silver_fct_refunds r
+  WHERE r.is_completed = true
+    AND r.order_id IN (SELECT DISTINCT order_id FROM eligible_lines)
+  GROUP BY r.order_id
+),
+raw_lines AS (
+  SELECT
+    el.*,
+    SUM(el.line_total_cents) OVER (PARTITION BY el.order_id)::BIGINT AS order_lines_total,
     COALESCE(orf.refund_cents, 0)::BIGINT AS order_refund_cents
-  FROM bronze.bronze_oltp__order_items oi
-  INNER JOIN eligible_orders eo ON eo.id = oi.order_id
-  INNER JOIN bronze.bronze_oltp__product_variants pv ON pv.id = oi.variant_id
-  INNER JOIN bronze.bronze_oltp__products pr ON pr.id = pv.product_id
-  LEFT JOIN order_refunds orf ON orf.order_id = oi.order_id
+  FROM eligible_lines el
+  LEFT JOIN order_refunds orf ON orf.order_id = el.order_id
 ),
 lines AS (
   SELECT
     line_id,
     order_id,
     placed_at,
+    order_date,
     product_id,
     variant_id,
     product_name,
@@ -121,8 +119,8 @@ export class ProductsAnalyticsService {
         from: range.from,
         to: range.to,
         defaultRangeDays: DEFAULT_RANGE_DAYS,
-        source: 'bronze',
-        note: 'Raw bronze joins (not silver/gold). Refunds allocated to products by line revenue share of the order.',
+        source: 'silver',
+        note: 'Queries silver facts/dims (cleaned). Refunds allocated by line revenue share. Gold marts not used yet.',
       },
       summary,
       revenueOverTime: series,
@@ -155,10 +153,10 @@ export class ProductsAnalyticsService {
         SELECT
           AVG(rating)::DOUBLE AS avg_rating,
           COUNT(*)::BIGINT AS review_count
-        FROM bronze.bronze_oltp__product_reviews pr
+        FROM silver.silver_fct_reviews rv
         CROSS JOIN params p
-        WHERE pr.created_at >= p.start_date
-          AND pr.created_at < p.end_date + INTERVAL '1 day'
+        WHERE rv.review_date >= p.start_date
+          AND rv.review_date <= p.end_date
       )
       SELECT
         COALESCE(SUM(l.line_total_cents), 0) AS gross_revenue_cents,
@@ -185,7 +183,7 @@ export class ProductsAnalyticsService {
     const sql = `
       ${LINES_CTE}
       SELECT
-        CAST(l.placed_at AS DATE) AS date,
+        CAST(l.order_date AS DATE) AS date,
         COALESCE(SUM(l.line_total_cents), 0) AS gross_revenue_cents,
         COALESCE(SUM(l.line_total_cents - l.refund_cents), 0) AS net_revenue_cents,
         COALESCE(SUM(l.refund_cents), 0) AS refund_cents,
@@ -421,7 +419,7 @@ export class ProductsAnalyticsService {
     const overTimeSql = `
       ${LINES_CTE}
       SELECT
-        CAST(l.placed_at AS DATE) AS date,
+        CAST(l.order_date AS DATE) AS date,
         COALESCE(SUM(l.refund_cents), 0) AS refund_cents,
         COUNT(DISTINCT CASE WHEN l.refund_cents > 0 THEN l.order_id END) AS refunded_order_count
       FROM lines l

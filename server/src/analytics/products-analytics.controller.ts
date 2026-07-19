@@ -11,7 +11,7 @@ export class ProductsAnalyticsController {
   ) {}
 
   /**
-   * Product performance from DuckDB bronze (raw joins).
+   * Product performance from DuckDB silver facts/dims.
    *
    * Query: from, to (YYYY-MM-DD, inclusive). Default window = last 60 days.
    */

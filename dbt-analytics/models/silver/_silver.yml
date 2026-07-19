@@ -1,0 +1,124 @@
+version: 2
+
+models:
+  - name: silver_dim_customers
+    description: Cleaned customers with optional default shipping geo.
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+
+  - name: silver_dim_products
+    description: Cleaned product dimension.
+    columns:
+      - name: product_id
+        tests: [unique, not_null]
+      - name: product_slug
+        tests: [unique, not_null]
+
+  - name: silver_dim_variants
+    description: SKU / variant dimension with list price and cost.
+    columns:
+      - name: variant_id
+        tests: [unique, not_null]
+      - name: sku
+        tests: [not_null]
+      - name: product_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_dim_products')
+              field: product_id
+
+  - name: silver_dim_categories
+    description: Category dimension (path from OLTP).
+    columns:
+      - name: category_id
+        tests: [unique, not_null]
+
+  - name: silver_dim_dates
+    description: Calendar spine from min/max order dates.
+    columns:
+      - name: date_day
+        tests: [unique, not_null]
+
+  - name: silver_fct_orders
+    description: Order fact with revenue flags.
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: customer_id
+        tests: [not_null]
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: [pending, paid, fulfilled, cancelled, refunded]
+
+  - name: silver_fct_order_items
+    description: Order line fact with COGS and margin.
+    columns:
+      - name: order_item_id
+        tests: [unique, not_null]
+      - name: order_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_fct_orders')
+              field: order_id
+      - name: variant_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('silver_dim_variants')
+              field: variant_id
+
+  - name: silver_fct_payments
+    description: Payment fact linked to orders.
+    columns:
+      - name: payment_id
+        tests: [unique, not_null]
+      - name: payment_status
+        tests:
+          - accepted_values:
+              values: [pending, succeeded, refunded, failed]
+              config:
+                severity: warn
+
+  - name: silver_fct_shipments
+    description: Shipment fact with lead-time metrics.
+    columns:
+      - name: shipment_id
+        tests: [unique, not_null]
+
+  - name: silver_fct_refunds
+    description: Refund fact linked through payments.
+    columns:
+      - name: refund_id
+        tests: [unique, not_null]
+      - name: payment_id
+        tests: [not_null]
+
+  - name: silver_fct_carts
+    description: Cart fact with conversion / abandonment flags.
+    columns:
+      - name: cart_id
+        tests: [unique, not_null]
+
+  - name: silver_fct_inventory
+    description: Inventory snapshot by warehouse × variant.
+    columns:
+      - name: warehouse_id
+        tests: [not_null]
+      - name: variant_id
+        tests: [not_null]
+
+  - name: silver_fct_reviews
+    description: Product reviews with valid 1–5 ratings.
+    columns:
+      - name: review_id
+        tests: [unique, not_null]
+      - name: rating
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+              quote: false

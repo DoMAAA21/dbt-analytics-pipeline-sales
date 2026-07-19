@@ -86,7 +86,7 @@ export type ProductsAnalyticsResponse = {
     from: string;
     to: string;
     defaultRangeDays: number;
-    source: "bronze";
+    source: "silver";
     note: string;
   };
   summary: ProductsAnalyticsSummary;

@@ -33,7 +33,7 @@ export default function ProductsAnalyticsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Products</h1>
           <p className="text-sm text-muted-foreground">
             Revenue, portfolio concentration, and reimbursements from DuckDB
-            bronze (raw joins — not gold marts yet).
+            silver facts (cleaned dims/facts — gold marts next).
           </p>
         </div>
         <DateRangeFilters

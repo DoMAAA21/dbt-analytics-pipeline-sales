@@ -58,7 +58,7 @@ export function RevenueOverTimeChart({ data }: RevenueOverTimeChartProps) {
       <CardHeader>
         <CardTitle>Revenue over time</CardTitle>
         <CardDescription>
-          Daily gross vs net revenue and reimbursements (bronze).
+          Daily gross vs net revenue and reimbursements (silver).
         </CardDescription>
       </CardHeader>
       <CardContent>

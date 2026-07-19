@@ -59,7 +59,7 @@ curl -s http://localhost:5004/api/v1/health
 # { "status":"ok", "database":"connected", "duckdb":"connected", ... }
 ```
 
-Products analytics (JWT cookie required; bronze raw queries; default last **60 days**):
+Products analytics (JWT cookie required; silver facts; default last **60 days**):
 
 ```bash
 # after login (cookie jar)
@@ -163,9 +163,44 @@ dbt run --select path:models/bronze
 dbt run --select bronze_oltp__product_reviews bronze_oltp__coupon_redemptions
 ```
 
-Close any DuckDB UI/CLI on `dev.duckdb` before `dbt run` (file lock).
+Close any DuckDB UI/CLI **and stop Nest** (`pnpm start:dev`) before `dbt run` — both lock `dev.duckdb`.
 
 Warehouse file: **`dbt-analytics/dev.duckdb`** (not the repo root).
+
+---
+
+## dbt (Silver — cleaned dims / facts)
+
+Build after bronze. Models live under `models/silver/`.
+
+```bash
+cd dbt-analytics
+source .venv/bin/activate
+
+# Compile / see graph (optional)
+dbt ls --select path:models/silver
+dbt compile --select path:models/silver
+
+# Run all silver models (depends on bronze)
+dbt run --select path:models/silver
+
+# Or: bronze + silver in one go
+dbt run --select path:models/bronze path:models/silver
+
+# Run tests (unique / not_null / relationships)
+dbt test --select path:models/silver
+```
+
+Inspect in DuckDB:
+
+```sql
+SHOW TABLES FROM silver;
+SELECT * FROM silver.silver_fct_orders LIMIT 10;
+SELECT order_status, count(*) FROM silver.silver_fct_orders GROUP BY 1;
+SELECT * FROM silver.silver_dim_dates LIMIT 10;
+```
+
+Skipped for now (no bronze source yet): `silver_dim_payment_methods`, `silver_dim_warehouses`, `silver_fct_returns`.
 
 ---
 
