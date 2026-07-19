@@ -1,3 +1,4 @@
 allowBuilds:
   bcrypt: true
+  duckdb: true
   unrs-resolver: true

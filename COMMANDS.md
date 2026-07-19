@@ -52,6 +52,15 @@ cd server
 pnpm start:dev          # Nest on :5004
 ```
 
+Health check (Postgres + DuckDB):
+
+```bash
+curl -s http://localhost:5004/api/v1/health
+# { "status":"ok", "database":"connected", "duckdb":"connected", ... }
+```
+
+`DUCKDB_PATH` (in `.env`) points Nest at `dbt-analytics/dev.duckdb` in **read-only** mode. Close `duckdb -ui` / finish `dbt run` if the server fails to open the file (lock).
+
 ---
 
 ## Migrations (TypeORM)

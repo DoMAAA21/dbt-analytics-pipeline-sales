@@ -5,13 +5,14 @@ import { LoggerModule } from 'nestjs-pino';
 import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { DuckDbModule } from './duckdb/duckdb.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: ['.env'],
+      envFilePath: ['.env', '../.env'],
     }),
     LoggerModule.forRootAsync({
       inject: [ConfigService],
@@ -59,6 +60,7 @@ import { UsersModule } from './users/users.module';
         migrationsRun: false,
       }),
     }),
+    DuckDbModule,
     UsersModule,
     AuthModule,
   ],
