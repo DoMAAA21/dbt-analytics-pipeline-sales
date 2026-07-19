@@ -1,5 +1,5 @@
 import { useRoutes } from "react-router-dom";
-import Login from "./app/(auth)/login";
+import Login from "./app/(auth)/login/page";
 
 export function useAppRoutes() {
   return useRoutes([
