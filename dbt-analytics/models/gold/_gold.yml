@@ -1,0 +1,20 @@
+version: 2
+
+models:
+  - name: gold_mart_daily_sales
+    description: >
+      Day-grain executive mart — GMV, net, refunds, AOV, review stats.
+      One row per order_date.
+    columns:
+      - name: order_date
+        tests: [unique, not_null]
+
+  - name: gold_mart_product_sales
+    description: >
+      Day × product mart — revenue, allocated refunds, margin, units.
+      Powers the Products analytics API.
+    columns:
+      - name: order_date
+        tests: [not_null]
+      - name: product_id
+        tests: [not_null]

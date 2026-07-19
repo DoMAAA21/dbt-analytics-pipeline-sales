@@ -59,7 +59,7 @@ curl -s http://localhost:5004/api/v1/health
 # { "status":"ok", "database":"connected", "duckdb":"connected", ... }
 ```
 
-Products analytics (JWT cookie required; silver facts; default last **60 days**):
+Products analytics (JWT cookie required; gold marts; default last **60 days**):
 
 ```bash
 # after login (cookie jar)
@@ -201,6 +201,54 @@ SELECT * FROM silver.silver_dim_dates LIMIT 10;
 ```
 
 Skipped for now (no bronze source yet): `silver_dim_payment_methods`, `silver_dim_warehouses`, `silver_fct_returns`.
+
+---
+
+## dbt (Gold — chart / API marts)
+
+Build after silver. **Only 2 gold tables** (different grains — don’t mash into one):
+
+| Mart | Grain | Use |
+|---|---|---|
+| `gold_mart_daily_sales` | 1 row / day | KPIs, order counts, refunds, reviews |
+| `gold_mart_product_sales` | 1 row / day × product | Products charts / portfolio |
+
+```bash
+cd dbt-analytics
+source .venv/bin/activate
+
+# Stop Nest + duckdb UI first (file lock)
+
+dbt run --select path:models/gold
+dbt test --select path:models/gold
+```
+
+Inspect:
+
+```sql
+SHOW TABLES FROM gold;
+SELECT * FROM gold.gold_mart_daily_sales ORDER BY order_date DESC LIMIT 14;
+SELECT * FROM gold.gold_mart_product_sales
+WHERE order_date BETWEEN DATE '2026-05-19' AND DATE '2026-07-19'
+ORDER BY gross_revenue_cents DESC LIMIT 15;
+```
+
+Optional cleanup of old unused gold tables left in DuckDB from earlier runs:
+
+```sql
+DROP TABLE IF EXISTS gold.gold_mart_orders_by_status;
+DROP TABLE IF EXISTS gold.gold_mart_variant_sales;
+DROP TABLE IF EXISTS gold.gold_mart_customer_activity;
+DROP TABLE IF EXISTS gold.gold_mart_customer_ltv;
+DROP TABLE IF EXISTS gold.gold_mart_customer_cohorts;
+DROP TABLE IF EXISTS gold.gold_mart_geo_sales;
+DROP TABLE IF EXISTS gold.gold_mart_funnel_daily;
+DROP TABLE IF EXISTS gold.gold_mart_review_stats;
+DROP TABLE IF EXISTS gold.gold_mart_payments;
+DROP TABLE IF EXISTS gold.gold_mart_fulfillment;
+DROP TABLE IF EXISTS gold.gold_mart_inventory_health;
+DROP TABLE IF EXISTS gold.gold_mart_refunds;
+```
 
 ---
 

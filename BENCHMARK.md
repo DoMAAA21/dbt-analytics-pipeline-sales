@@ -1,6 +1,12 @@
-# Benchmark — Bronze vs Silver (Products Analytics)
+# Benchmark — Bronze vs Silver vs Gold (Products Analytics)
 
-Measured locally on DuckDB (`dbt-analytics/dev.duckdb`) to compare the Nest products analytics query shape when reading **bronze** (raw joins) vs **silver** (cleaned facts/dims).
+Measured locally on DuckDB (`dbt-analytics/dev.duckdb`) to compare Nest-style products analytics when reading:
+
+| Layer | What the API scans |
+|---|---|
+| **Bronze** | Raw OLTP mirrors + joins every request |
+| **Silver** | Cleaned facts/dims + refund allocation every request |
+| **Gold** | Pre-aggregated marts (`gold_mart_product_sales`, `gold_mart_daily_sales`, …) |
 
 ## Setup
 
@@ -11,39 +17,53 @@ Measured locally on DuckDB (`dbt-analytics/dev.duckdb`) to compare the Nest prod
 | Runs | 7 per query (1 warm-up discarded; fresh connection each timed run) |
 | Machine | Local macOS (same host as Nest / dbt) |
 | Warehouse size | ~1.4–1.5 GiB `dev.duckdb` |
+| Nest path today | **Gold** (`server/src/analytics/products-analytics.service.ts`) |
 
-**Workload slice (both layers, same totals):**
+**Workload slice (all layers, same totals):**
 
 - ~197,683 revenue orders  
-- ~582,591 order lines  
 - Gross `15,166,002,261` cents · Net `14,715,023,994` · Refunds `450,978,267` · COGS `7,240,992,688`  
 - 10,000 products  
 
-Totals matched exactly between bronze and silver for this window.
+Totals matched exactly across bronze / silver / gold for this window.
 
 ## Results
 
-| Query | Bronze (avg) | Silver (avg) | Speedup |
-|---|---:|---:|---:|
-| Summary KPIs | 87.8 ms | 36.2 ms | **2.4×** |
-| Daily series | 86.7 ms | 29.4 ms | **3.0×** |
-| Top 15 products | 78.1 ms | 31.9 ms | **2.4×** |
-| **3-query bundle** (summary + daily + top15) | **239.0 ms** | **87.2 ms** | **2.7×** |
+### Per query (avg ms)
 
-p50 / min / max (ms):
+| Query | Bronze | Silver | Gold | vs bronze | vs silver |
+|---|---:|---:|---:|---:|---:|
+| Summary KPIs | 86.7 | 37.3 | **7.7** | **11.3×** | **4.8×** |
+| Daily series | 86.4 | 29.3 | **4.9** | **17.6×** | **6.0×** |
+| Top 15 products | 76.3 | 30.7 | **5.5** | **13.9×** | **5.6×** |
+| **3-query bundle** | **233.1** | **87.1** | **16.3** | **14.3×** | **5.3×** |
 
-| Query | Bronze p50 (min–max) | Silver p50 (min–max) |
+### p50 / min / max (ms)
+
+| Query | Bronze | Silver | Gold |
+|---|---|---|---|
+| Summary | 87.4 (84.7–88.3) | 35.2 (34.0–42.8) | 7.7 (7.5–8.0) |
+| Daily | 86.2 (85.1–89.2) | 29.3 (28.7–30.2) | 4.9 (4.7–5.2) |
+| Top 15 | 76.4 (74.9–77.7) | 30.5 (30.2–31.2) | 5.5 (5.4–5.6) |
+| 3-query bundle | 232.7 (232.1–234.5) | 87.0 (86.6–87.8) | 16.3 (16.1–16.6) |
+
+### Headline
+
+| Comparison | Bundle | Saved |
 |---|---|---|
-| Summary | 87.7 (85.1–93.6) | 36.1 (34.2–39.1) |
-| Daily | 86.6 (85.0–88.8) | 29.3 (28.8–30.2) |
-| Top 15 | 78.1 (76.5–79.5) | 30.9 (30.6–37.9) |
-| 3-query bundle | 238.8 (237.0–242.0) | 87.1 (86.6–87.9) |
+| Silver vs bronze | **~2.7×** faster | ~146 ms |
+| **Gold vs bronze** | **~14×** faster | ~217 ms |
+| **Gold vs silver** | **~5.3×** faster | ~71 ms |
 
-**Net:** silver saved ~**152 ms** on the 3-query bundle (~**2.7×** faster) for the same numbers.
+```text
+bronze ████████████████████████████████████████  233 ms
+silver ███████████████                           87 ms
+gold   ███                                       16 ms
+```
 
 ## What each side does
 
-### Bronze (API-style)
+### Bronze
 
 Re-joins on every request:
 
@@ -51,56 +71,55 @@ Re-joins on every request:
 + `payments` → `refunds`  
 then allocates refunds by line share and aggregates.
 
-### Silver (current Nest path)
+### Silver
 
-Reads pre-joined / cleaned models:
+Reads cleaned models (`silver_fct_order_items`, `silver_fct_refunds`, …) with flags/COGS already present, but still allocates refunds and aggregates ~580k lines per request.
 
-- `silver.silver_fct_order_items` (`is_revenue_order`, COGS, product attrs)  
-- `silver.silver_fct_refunds` (`is_completed`, `order_id`)  
-- (reviews) `silver.silver_fct_reviews`  
+### Gold (current Nest path)
 
-Less join work at request time; dbt already paid that cost at transform time.
+Reads pre-aggregated marts (**2 tables**):
 
-## Why silver is faster (here)
+- `gold.gold_mart_daily_sales` — day grain (orders, GMV, refunds, reviews)  
+- `gold.gold_mart_product_sales` — day × product (revenue, refunds, margin, units)  
 
-1. **Fewer joins at query time** — variants/products/status flags already on the fact.  
-2. **Cheaper filters** — `order_date` + `is_revenue_order` vs scanning/joining raw timestamps + status strings across several bronze tables.  
-3. **Same DuckDB file** — difference is model shape, not network.
+API mostly `SUM` / `GROUP BY` over a small day×product slice (~60 days × products with sales), not raw line joins.
 
-This is **not** “GB scanned” (cloud warehouse billing). Locally we measure wall time + plan/row counts (`EXPLAIN ANALYZE`).
+## Why gold wins here
+
+1. **dbt paid the join/allocation cost at transform time**  
+2. **Fewer rows scanned** — day×product mart vs hundreds of thousands of order lines  
+3. **Same DuckDB file** — difference is model shape, not network  
+
+This is **not** cloud “GB scanned.” Locally we measure wall time (+ optional `EXPLAIN ANALYZE`).
 
 ## How to reproduce
 
-Stop Nest / `duckdb -ui` first (file lock), then from `dbt-analytics/` with the venv active, run a timed comparison in Python/DuckDB or:
+Stop Nest / `duckdb -ui` first (file lock). From `dbt-analytics/` with the venv active, time comparable queries or:
 
 ```sql
--- Silver path (example summary filter)
 EXPLAIN ANALYZE
-SELECT COUNT(*), SUM(line_total_cents)
+SELECT SUM(gross_revenue_cents), COUNT(DISTINCT product_id)
+FROM gold.gold_mart_product_sales
+WHERE order_date BETWEEN DATE '2026-05-19' AND DATE '2026-07-19';
+```
+
+```sql
+EXPLAIN ANALYZE
+SELECT SUM(line_total_cents), COUNT(DISTINCT product_id)
 FROM silver.silver_fct_order_items
 WHERE order_date BETWEEN DATE '2026-05-19' AND DATE '2026-07-19'
   AND is_revenue_order = true;
 ```
 
-```sql
--- Bronze path (example: date-filtered orders only)
-EXPLAIN ANALYZE
-SELECT COUNT(*)
-FROM bronze.bronze_oltp__orders
-WHERE placed_at >= DATE '2026-05-19'
-  AND placed_at < DATE '2026-07-20'
-  AND status IN ('paid', 'fulfilled', 'refunded');
-```
+For Nest end-to-end latency, time:
 
-For Nest end-to-end latency, time `GET /api/v1/analytics/products?from=2026-05-19&to=2026-07-19` (includes HTTP + several parallel DuckDB queries). Expect DuckDB work in the same ballpark as the bundle above; full HTTP will be higher.
+`GET /api/v1/analytics/products?from=2026-05-19&to=2026-07-19`
 
-## Expected next step (Gold)
-
-Gold marts (e.g. daily product sales) should widen the gap further: Nest reads **pre-aggregated** day/product rows instead of re-aggregating ~580k lines per request.
+(HTTP + several parallel DuckDB queries; DuckDB work should land near the gold bundle above).
 
 ## Related
 
-- Products API: `server/src/analytics/products-analytics.service.ts` (queries **silver**)  
-- Silver models: `dbt-analytics/models/silver/`  
+- Products API (gold): `server/src/analytics/products-analytics.service.ts`  
+- Models: `dbt-analytics/models/{bronze,silver,gold}/`  
 - Commands: [`COMMANDS.md`](./COMMANDS.md)  
 - Layer plan: [`ANALYTICS.md`](./ANALYTICS.md)  

@@ -19,69 +19,29 @@ import type {
 
 const DEFAULT_RANGE_DAYS = 60;
 
-/**
- * Shared CTE over silver facts/dims.
- * Refunds allocated to products by line revenue share of the order.
- */
-const LINES_CTE = `
+/** Date-bounded product mart rows (pre-aggregated day × product). */
+const PRODUCT_RANGE_CTE = `
 WITH params AS (
   SELECT ?::DATE AS start_date, ?::DATE AS end_date
 ),
-eligible_lines AS (
+product_days AS (
   SELECT
-    oi.order_item_id AS line_id,
-    oi.order_id,
-    oi.placed_at,
-    oi.order_date,
-    oi.product_id,
-    oi.variant_id,
-    oi.product_name,
-    oi.quantity::BIGINT AS quantity,
-    oi.line_total_cents::BIGINT AS line_total_cents,
-    oi.discount_cents::BIGINT AS discount_cents,
-    oi.cogs_cents::BIGINT AS cogs_cents
-  FROM silver.silver_fct_order_items oi
+    ps.order_date,
+    ps.product_id,
+    ps.product_name,
+    ps.sku_count,
+    ps.order_count,
+    ps.units_sold,
+    ps.gross_revenue_cents,
+    ps.refund_cents,
+    ps.net_revenue_cents,
+    ps.discount_cents,
+    ps.cogs_cents,
+    ps.gross_margin_cents
+  FROM gold.gold_mart_product_sales ps
   CROSS JOIN params p
-  WHERE oi.order_date >= p.start_date
-    AND oi.order_date <= p.end_date
-    AND oi.is_revenue_order = true
-),
-order_refunds AS (
-  SELECT
-    r.order_id,
-    COALESCE(SUM(r.refund_cents), 0)::BIGINT AS refund_cents
-  FROM silver.silver_fct_refunds r
-  WHERE r.is_completed = true
-    AND r.order_id IN (SELECT DISTINCT order_id FROM eligible_lines)
-  GROUP BY r.order_id
-),
-raw_lines AS (
-  SELECT
-    el.*,
-    SUM(el.line_total_cents) OVER (PARTITION BY el.order_id)::BIGINT AS order_lines_total,
-    COALESCE(orf.refund_cents, 0)::BIGINT AS order_refund_cents
-  FROM eligible_lines el
-  LEFT JOIN order_refunds orf ON orf.order_id = el.order_id
-),
-lines AS (
-  SELECT
-    line_id,
-    order_id,
-    placed_at,
-    order_date,
-    product_id,
-    variant_id,
-    product_name,
-    quantity,
-    line_total_cents,
-    discount_cents,
-    cogs_cents,
-    CASE
-      WHEN order_lines_total > 0 THEN
-        CAST(ROUND(order_refund_cents * (line_total_cents::DOUBLE / order_lines_total)) AS BIGINT)
-      ELSE 0
-    END AS refund_cents
-  FROM raw_lines
+  WHERE ps.order_date >= p.start_date
+    AND ps.order_date <= p.end_date
 )
 `;
 
@@ -99,7 +59,7 @@ export class ProductsAnalyticsService {
     const params = [range.from, range.to] as const;
 
     this.logger.debug(
-      `products analytics ${range.from} → ${range.to} (limit=${limit})`,
+      `products analytics (gold) ${range.from} → ${range.to} (limit=${limit})`,
     );
 
     const [summaryRow, series, topProducts, portfolioRows, reimbursements] =
@@ -111,21 +71,18 @@ export class ProductsAnalyticsService {
         this.fetchReimbursements(params, limit),
       ]);
 
-    const summary = this.mapSummary(summaryRow);
-    const portfolio = this.buildPortfolio(portfolioRows);
-
     return {
       meta: {
         from: range.from,
         to: range.to,
         defaultRangeDays: DEFAULT_RANGE_DAYS,
-        source: 'silver',
-        note: 'Queries silver facts/dims (cleaned). Refunds allocated by line revenue share. Gold marts not used yet.',
+        source: 'gold',
+        note: 'Queries 2 gold marts: gold_mart_daily_sales + gold_mart_product_sales.',
       },
-      summary,
+      summary: this.mapSummary(summaryRow),
       revenueOverTime: series,
       topProducts,
-      portfolio,
+      portfolio: this.buildPortfolio(portfolioRows),
       reimbursements,
     };
   }
@@ -148,29 +105,34 @@ export class ProductsAnalyticsService {
 
   private async fetchSummary(params: readonly [string, string]) {
     const sql = `
-      ${LINES_CTE}
-      , reviews AS (
+      ${PRODUCT_RANGE_CTE}
+      , daily AS (
         SELECT
-          AVG(rating)::DOUBLE AS avg_rating,
-          COUNT(*)::BIGINT AS review_count
-        FROM silver.silver_fct_reviews rv
+          COALESCE(SUM(order_count), 0) AS order_count,
+          COALESCE(SUM(review_count), 0) AS review_count,
+          CASE
+            WHEN SUM(review_count) > 0
+            THEN SUM(avg_rating * review_count)::DOUBLE / SUM(review_count)
+            ELSE NULL
+          END AS avg_rating
+        FROM gold.gold_mart_daily_sales ds
         CROSS JOIN params p
-        WHERE rv.review_date >= p.start_date
-          AND rv.review_date <= p.end_date
+        WHERE ds.order_date >= p.start_date
+          AND ds.order_date <= p.end_date
       )
       SELECT
-        COALESCE(SUM(l.line_total_cents), 0) AS gross_revenue_cents,
-        COALESCE(SUM(l.line_total_cents - l.refund_cents), 0) AS net_revenue_cents,
-        COALESCE(SUM(l.refund_cents), 0) AS refund_cents,
-        COALESCE(SUM(l.discount_cents), 0) AS discount_cents,
-        COALESCE(SUM(l.cogs_cents), 0) AS cogs_cents,
-        COALESCE(SUM(l.quantity), 0) AS units_sold,
-        COUNT(DISTINCT l.order_id) AS order_count,
-        COUNT(*) AS line_item_count,
-        COUNT(DISTINCT l.product_id) AS product_count,
-        (SELECT avg_rating FROM reviews) AS avg_rating,
-        (SELECT review_count FROM reviews) AS review_count
-      FROM lines l
+        COALESCE(SUM(pd.gross_revenue_cents), 0) AS gross_revenue_cents,
+        COALESCE(SUM(pd.net_revenue_cents), 0) AS net_revenue_cents,
+        COALESCE(SUM(pd.refund_cents), 0) AS refund_cents,
+        COALESCE(SUM(pd.discount_cents), 0) AS discount_cents,
+        COALESCE(SUM(pd.cogs_cents), 0) AS cogs_cents,
+        COALESCE(SUM(pd.units_sold), 0) AS units_sold,
+        (SELECT order_count FROM daily) AS order_count,
+        0 AS line_item_count,
+        COUNT(DISTINCT pd.product_id) AS product_count,
+        (SELECT avg_rating FROM daily) AS avg_rating,
+        (SELECT review_count FROM daily) AS review_count
+      FROM product_days pd
     `;
 
     const rows = await this.duckDb.queryWithParams(sql, [...params]);
@@ -181,18 +143,30 @@ export class ProductsAnalyticsService {
     params: readonly [string, string],
   ): Promise<ProductsRevenuePoint[]> {
     const sql = `
-      ${LINES_CTE}
+      ${PRODUCT_RANGE_CTE}
+      , by_day AS (
+        SELECT
+          pd.order_date AS date,
+          COALESCE(SUM(pd.gross_revenue_cents), 0) AS gross_revenue_cents,
+          COALESCE(SUM(pd.net_revenue_cents), 0) AS net_revenue_cents,
+          COALESCE(SUM(pd.refund_cents), 0) AS refund_cents,
+          COALESCE(SUM(pd.discount_cents), 0) AS discount_cents,
+          COALESCE(SUM(pd.units_sold), 0) AS units_sold
+        FROM product_days pd
+        GROUP BY pd.order_date
+      )
       SELECT
-        CAST(l.order_date AS DATE) AS date,
-        COALESCE(SUM(l.line_total_cents), 0) AS gross_revenue_cents,
-        COALESCE(SUM(l.line_total_cents - l.refund_cents), 0) AS net_revenue_cents,
-        COALESCE(SUM(l.refund_cents), 0) AS refund_cents,
-        COALESCE(SUM(l.discount_cents), 0) AS discount_cents,
-        COALESCE(SUM(l.quantity), 0) AS units_sold,
-        COUNT(DISTINCT l.order_id) AS order_count
-      FROM lines l
-      GROUP BY 1
-      ORDER BY 1
+        b.date,
+        b.gross_revenue_cents,
+        b.net_revenue_cents,
+        b.refund_cents,
+        b.discount_cents,
+        b.units_sold,
+        COALESCE(ds.order_count, 0) AS order_count
+      FROM by_day b
+      LEFT JOIN gold.gold_mart_daily_sales ds
+        ON ds.order_date = b.date
+      ORDER BY b.date
     `;
 
     const rows = await this.duckDb.queryWithParams(sql, [...params]);
@@ -213,21 +187,21 @@ export class ProductsAnalyticsService {
     limit: number,
   ): Promise<ProductPerformanceRow[]> {
     const sql = `
-      ${LINES_CTE}
+      ${PRODUCT_RANGE_CTE}
       , product_agg AS (
         SELECT
-          l.product_id,
-          ANY_VALUE(l.product_name) AS product_name,
-          COUNT(DISTINCT l.variant_id) AS sku_count,
-          SUM(l.line_total_cents) AS gross_revenue_cents,
-          SUM(l.line_total_cents - l.refund_cents) AS net_revenue_cents,
-          SUM(l.refund_cents) AS refund_cents,
-          SUM(l.discount_cents) AS discount_cents,
-          SUM(l.cogs_cents) AS cogs_cents,
-          SUM(l.quantity) AS units_sold,
-          COUNT(DISTINCT l.order_id) AS order_count
-        FROM lines l
-        GROUP BY l.product_id
+          pd.product_id,
+          ANY_VALUE(pd.product_name) AS product_name,
+          MAX(pd.sku_count) AS sku_count,
+          SUM(pd.gross_revenue_cents) AS gross_revenue_cents,
+          SUM(pd.net_revenue_cents) AS net_revenue_cents,
+          SUM(pd.refund_cents) AS refund_cents,
+          SUM(pd.discount_cents) AS discount_cents,
+          SUM(pd.cogs_cents) AS cogs_cents,
+          SUM(pd.units_sold) AS units_sold,
+          SUM(pd.order_count) AS order_count
+        FROM product_days pd
+        GROUP BY pd.product_id
       ),
       totals AS (
         SELECT COALESCE(SUM(gross_revenue_cents), 0) AS total_gross FROM product_agg
@@ -287,13 +261,13 @@ export class ProductsAnalyticsService {
 
   private async fetchPortfolioRanks(params: readonly [string, string]) {
     const sql = `
-      ${LINES_CTE}
+      ${PRODUCT_RANGE_CTE}
       , product_rev AS (
         SELECT
-          l.product_id,
-          SUM(l.line_total_cents)::BIGINT AS gross_revenue_cents
-        FROM lines l
-        GROUP BY l.product_id
+          pd.product_id,
+          SUM(pd.gross_revenue_cents)::BIGINT AS gross_revenue_cents
+        FROM product_days pd
+        GROUP BY pd.product_id
       ),
       ranked AS (
         SELECT
@@ -408,36 +382,45 @@ export class ProductsAnalyticsService {
     limit: number,
   ): Promise<ProductsReimbursements> {
     const summarySql = `
-      ${LINES_CTE}
+      ${PRODUCT_RANGE_CTE}
+      , refund_orders AS (
+        SELECT COALESCE(SUM(refunded_order_count), 0) AS refunded_order_count
+        FROM gold.gold_mart_daily_sales ds
+        CROSS JOIN params p
+        WHERE ds.order_date >= p.start_date
+          AND ds.order_date <= p.end_date
+      )
       SELECT
-        COALESCE(SUM(l.refund_cents), 0) AS refund_cents,
-        COUNT(DISTINCT CASE WHEN l.refund_cents > 0 THEN l.order_id END) AS refunded_order_count,
-        COALESCE(SUM(l.line_total_cents), 0) AS gross_revenue_cents
-      FROM lines l
+        COALESCE(SUM(pd.refund_cents), 0) AS refund_cents,
+        (SELECT refunded_order_count FROM refund_orders) AS refunded_order_count,
+        COALESCE(SUM(pd.gross_revenue_cents), 0) AS gross_revenue_cents
+      FROM product_days pd
     `;
 
     const overTimeSql = `
-      ${LINES_CTE}
+      ${PRODUCT_RANGE_CTE}
       SELECT
-        CAST(l.order_date AS DATE) AS date,
-        COALESCE(SUM(l.refund_cents), 0) AS refund_cents,
-        COUNT(DISTINCT CASE WHEN l.refund_cents > 0 THEN l.order_id END) AS refunded_order_count
-      FROM lines l
-      GROUP BY 1
+        pd.order_date AS date,
+        COALESCE(SUM(pd.refund_cents), 0) AS refund_cents,
+        COALESCE(MAX(ds.refunded_order_count), 0) AS refunded_order_count
+      FROM product_days pd
+      LEFT JOIN gold.gold_mart_daily_sales ds
+        ON ds.order_date = pd.order_date
+      GROUP BY pd.order_date
       ORDER BY 1
     `;
 
     const byProductSql = `
-      ${LINES_CTE}
+      ${PRODUCT_RANGE_CTE}
       , product_refunds AS (
         SELECT
-          l.product_id,
-          ANY_VALUE(l.product_name) AS product_name,
-          SUM(l.refund_cents) AS refund_cents,
-          SUM(l.quantity) AS units_sold
-        FROM lines l
-        GROUP BY l.product_id
-        HAVING SUM(l.refund_cents) > 0
+          pd.product_id,
+          ANY_VALUE(pd.product_name) AS product_name,
+          SUM(pd.refund_cents) AS refund_cents,
+          SUM(pd.units_sold) AS units_sold
+        FROM product_days pd
+        GROUP BY pd.product_id
+        HAVING SUM(pd.refund_cents) > 0
       ),
       totals AS (
         SELECT COALESCE(SUM(refund_cents), 0) AS total_refunds FROM product_refunds
