@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DuckDbModule } from './duckdb/duckdb.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -63,6 +64,7 @@ import { UsersModule } from './users/users.module';
     DuckDbModule,
     UsersModule,
     AuthModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

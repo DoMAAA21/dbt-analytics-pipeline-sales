@@ -45,18 +45,69 @@ export class DuckDbService implements OnModuleInit, OnModuleDestroy {
   }
 
   isReady() {
-    return this.connection !== null;
+    return this.instance !== null;
   }
 
   async query<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
   ): Promise<T[]> {
-    if (!this.connection) {
+    return this.queryWithParams<T>(sql, []);
+  }
+
+  /**
+   * Opens a short-lived connection per call so Promise.all is safe.
+   */
+  async queryWithParams<
+    T extends Record<string, unknown> = Record<string, unknown>,
+  >(sql: string, params: Array<string | number | bigint | null>): Promise<T[]> {
+    if (!this.instance) {
       throw new Error('DuckDB is not connected');
     }
 
-    const reader = await this.connection.runAndReadAll(sql);
-    return reader.getRowObjectsJson() as T[];
+    const connection = await this.instance.connect();
+
+    try {
+      if (params.length === 0) {
+        const reader = await connection.runAndReadAll(sql);
+        return reader.getRowObjectsJson() as T[];
+      }
+
+      const statement = await connection.prepare(sql);
+
+      try {
+        params.forEach((value, index) => {
+          const paramIndex = index + 1;
+
+          if (value === null) {
+            statement.bindNull(paramIndex);
+            return;
+          }
+
+          if (typeof value === 'bigint') {
+            statement.bindBigInt(paramIndex, value);
+            return;
+          }
+
+          if (typeof value === 'number') {
+            if (Number.isInteger(value)) {
+              statement.bindInteger(paramIndex, value);
+            } else {
+              statement.bindDouble(paramIndex, value);
+            }
+            return;
+          }
+
+          statement.bindVarchar(paramIndex, value);
+        });
+
+        const reader = await statement.runAndReadAll();
+        return reader.getRowObjectsJson() as T[];
+      } finally {
+        statement.destroySync();
+      }
+    } finally {
+      connection.closeSync();
+    }
   }
 
   async ping(): Promise<boolean> {

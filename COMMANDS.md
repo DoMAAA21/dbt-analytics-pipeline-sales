@@ -59,6 +59,18 @@ curl -s http://localhost:5004/api/v1/health
 # { "status":"ok", "database":"connected", "duckdb":"connected", ... }
 ```
 
+Products analytics (JWT cookie required; bronze raw queries; default last **60 days**):
+
+```bash
+# after login (cookie jar)
+curl -s -c cookies.txt -X POST http://localhost:5004/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"secret"}'
+
+curl -s -b cookies.txt \
+  'http://localhost:5004/api/v1/analytics/products?from=2026-05-19&to=2026-07-19&limit=15'
+```
+
 `DUCKDB_PATH` (in `.env`) points Nest at `dbt-analytics/dev.duckdb` in **read-only** mode. Close `duckdb -ui` / finish `dbt run` if the server fails to open the file (lock).
 
 ---
