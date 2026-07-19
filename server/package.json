@@ -19,6 +19,7 @@
     "migration:run": "pnpm typeorm migration:run -d src/database/data-source.ts",
     "migration:revert": "pnpm typeorm migration:revert -d src/database/data-source.ts",
     "migration:show": "pnpm typeorm migration:show -d src/database/data-source.ts",
+    "seed": "ts-node -P tsconfig.typeorm.json -r tsconfig-paths/register src/database/seed.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
