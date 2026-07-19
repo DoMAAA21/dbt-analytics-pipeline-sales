@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: oltp
+    description: PostgreSQL OLTP ecommerce database (attached read-only as DuckDB alias `oltp`).
+    database: oltp
+    schema: public
+    tables:
+      - name: users
+      - name: customers
+      - name: customer_addresses
+      - name: categories
+      - name: products
+      - name: product_variants
+      - name: inventory_levels
+      - name: carts
+      - name: cart_items
+      - name: orders
+      - name: order_items
+      - name: payments
+      - name: shipments
+      - name: refunds
+      - name: product_reviews
+      - name: coupons
+      - name: coupon_redemptions

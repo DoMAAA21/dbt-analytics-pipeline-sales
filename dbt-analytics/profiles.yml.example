@@ -1,0 +1,19 @@
+# Copy values into ~/.dbt/profiles.yml (dbt reads that by default).
+#
+# DuckDB = OLAP warehouse
+# Postgres (alias: oltp) = OLTP source, attached read-only
+
+ecommerce_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: dev.duckdb
+      threads: 4
+      extensions:
+        - postgres
+      attach:
+        - path: "postgresql://postgres:postgres@localhost:5432/dbt_analytics"
+          type: postgres
+          alias: oltp
+          read_only: true

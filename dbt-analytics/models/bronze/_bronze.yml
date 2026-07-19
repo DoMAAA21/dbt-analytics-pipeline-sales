@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: bronze_oltp__users
+    description: Raw users from OLTP.
+  - name: bronze_oltp__customers
+    description: Raw customers from OLTP.
+  - name: bronze_oltp__customer_addresses
+    description: Raw customer addresses from OLTP.
+  - name: bronze_oltp__categories
+    description: Raw categories from OLTP.
+  - name: bronze_oltp__products
+    description: Raw products from OLTP.
+  - name: bronze_oltp__product_variants
+    description: Raw product variants from OLTP.
+  - name: bronze_oltp__inventory_levels
+    description: Raw inventory levels from OLTP.
+  - name: bronze_oltp__carts
+    description: Raw carts from OLTP.
+  - name: bronze_oltp__cart_items
+    description: Raw cart items from OLTP.
+  - name: bronze_oltp__orders
+    description: Raw orders from OLTP.
+  - name: bronze_oltp__order_items
+    description: Raw order items from OLTP.
+  - name: bronze_oltp__payments
+    description: Raw payments from OLTP.
+  - name: bronze_oltp__shipments
+    description: Raw shipments from OLTP.
+  - name: bronze_oltp__refunds
+    description: Raw refunds from OLTP.
+  - name: bronze_oltp__product_reviews
+    description: Raw product reviews from OLTP.
+  - name: bronze_oltp__coupons
+    description: Raw coupons from OLTP.
+  - name: bronze_oltp__coupon_redemptions
+    description: Raw coupon redemptions from OLTP.

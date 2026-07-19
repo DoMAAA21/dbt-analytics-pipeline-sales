@@ -3,3 +3,8 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Accidental DuckDB files outside dbt-analytics/
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
